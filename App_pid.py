@@ -885,110 +885,256 @@ def step_12():
 
 
 def step_13():
-    st.markdown("### Parâmetros de Desempenho")
+    st.markdown("### Projeto de Controladores pelo Método do LGR")
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ctrl_type = st.selectbox("Controlador", ["PD", "PI", "PID (Zeros reais e iguais)"])
-    with col2:
-        mp = st.number_input("Sobressinal Mp (%)", value=10.0, step=1.0)
-    with col3:
-        ts = st.number_input("Tempo de Acomodação (s)", value=4.0, step=0.1)
-        crit = st.selectbox("Critério", ["5%", "2%"])
-        
-    use_custom = st.checkbox("Fornecer polo desejado (s_d) diretamente")
-    if use_custom:
-        c1, c2 = st.columns(2)
-        with c1:
-            sd_real = st.number_input("Parte Real", value=-4.0, step=0.1)
-        with c2:
-            sd_imag = st.number_input("Parte Imag (positiva)", value=4.0, step=0.1)
-        sd = complex(sd_real, abs(sd_imag))
-        st.latex(rf"s_d = {fmt_complex(sd)}")
-    else:
+    ctrl_type = st.selectbox("Controlador", ["PD", "PI", "PID"])
+    
+    st.markdown("#### 1) Definir especificações e localizar o polo desejado ($s_d$)")
+    
+    input_method = st.radio(
+        "Método de definição das especificações de malha fechada:",
+        ["Métricas de Desempenho (Mp e ts)", "Parâmetros de 2ª Ordem (ζ e ωn)", "Polo Desejado Direto (sd)"],
+        horizontal=True
+    )
+    
+    if input_method == "Métricas de Desempenho (Mp e ts)":
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            mp = st.number_input("Sobressinal Mp (%)", value=10.0, step=1.0)
+        with col2:
+            ts = st.number_input("Tempo de Acomodação (s)", value=4.0, step=0.1)
+        with col3:
+            crit = st.selectbox("Critério", ["5%", "2%"])
+            
         zeta = np.sqrt((np.log(mp/100)**2) / (np.pi**2 + (np.log(mp/100))**2))
-        wn = 4 / (zeta * ts) if crit == "2%" else 3 / (zeta * ts)
+        wn_mult = 4 if crit == "2%" else 3
+        wn = wn_mult / (zeta * ts)
         wd = wn * np.sqrt(1 - zeta**2)
         sd = -zeta * wn + 1j * wd
-        st.markdown("Cálculo do polo dominante desejado:")
-        st.latex(rf"\zeta = {fmt_number(zeta)},\quad \omega_n = {fmt_number(wn)} \text{{ rad/s}}")
-        st.latex(rf"s_d = -\zeta\omega_n + j\omega_d = {fmt_complex(sd)}")
         
-    zero_sum, pole_sum, angle_P = point_angle(sd, poles, zeros)
-    
-    st.markdown("### Deficiência Angular e Compensação")
-    st.markdown("Avaliamos a planta original $P(s)$ no polo desejado:")
-    st.latex(rf"\angle P(s_d) = {fmt_number(angle_P)}^\circ")
-    
-    angle_sd = np.degrees(np.angle(sd)) % 360
-    
-    if ctrl_type == "PD":
-        theta_z = (angle_P - 180) % 360
-        st.latex(rf"\theta_z = \angle P(s_d) - 180^\circ = {fmt_number(theta_z)}^\circ")
-    elif ctrl_type == "PI":
-        theta_z = (angle_P + angle_sd - 180) % 360
-        st.markdown("Para o PI, incluímos o ângulo do polo na origem:")
-        st.latex(rf"\theta_z = (\angle P(s_d) + \angle s_d - 180^\circ) = {fmt_number(theta_z)}^\circ")
-    else: 
-        total_z = (angle_P + angle_sd - 180) % 360
-        theta_z = total_z / 2
-        st.markdown("Para o PID com zeros duplos, cada zero contribui com metade do necessário:")
-        st.latex(rf"\theta_z = \frac{{\angle P(s_d) + \angle s_d - 180^\circ}}{{2}} = {fmt_number(theta_z)}^\circ")
+        st.markdown("A partir da equação do máximo pico e tempo de acomodação, obtemos:")
+        st.latex(rf"M_p = e^{{-\frac{{\zeta\pi}}{{\sqrt{{1-\zeta^2}}}}}} = {mp}\% \Rightarrow \zeta_{{min}} = {fmt_number(zeta)}")
+        st.latex(rf"t_s = \frac{{{wn_mult}}}{{\zeta\omega_n}} = {ts}\text{{s}} \Rightarrow (\zeta\omega_n)_{{min}} = {fmt_number(zeta*wn)}")
+        st.markdown("Sendo $\omega_d = \omega_n\sqrt{1-\zeta^2}$, os polos dominantes de malha fechada devem estar em:")
+        st.latex(rf"s_d = -\zeta\omega_n \pm j\omega_d = {fmt_complex(sd)}")
+
+    elif input_method == "Parâmetros de 2ª Ordem (ζ e ωn)":
+        col1, col2 = st.columns(2)
+        with col1:
+            zeta = st.number_input("Fator de Amortecimento (ζ)", value=0.7, step=0.05)
+        with col2:
+            wn = st.number_input("Frequência Natural (ωn) [rad/s]", value=0.5, step=0.1)
+            
+        wd = wn * np.sqrt(1 - zeta**2)
+        sd = -zeta * wn + 1j * wd
         
-    if theta_z <= 0 or theta_z >= 180:
-        status_line(f"O ângulo necessário para o zero ({fmt_number(theta_z)}°) não está no intervalo (0, 180°), indicando que não pode ser realizado com um zero real à esquerda.", "warning")
-        return
-        
-    z = (sd.imag / np.tan(np.radians(theta_z))) - sd.real
-    st.latex(rf"\text{{Posição do zero no eixo real: }} z = \frac{{\omega_d}}{{\tan(\theta_z)}} - \sigma_d = {fmt_number(z)}")
-    
-    if ctrl_type == "PD":
-        num_c = [1, z]
-        den_c = [1]
-        st.latex(rf"G_c(s) = K_c(s + {fmt_number(z)})")
-    elif ctrl_type == "PI":
-        num_c = [1, z]
-        den_c = [1, 0]
-        st.latex(rf"G_c(s) = K_c \frac{{s + {fmt_number(z)}}}{{s}}")
+        st.markdown("Com os parâmetros fornecidos diretamente:")
+        st.latex(rf"\zeta = {fmt_number(zeta)} \quad \text{{e}} \quad \omega_n = {fmt_number(wn)} \text{{ rad/s}}")
+        st.latex(rf"\omega_d = \omega_n\sqrt{{1-\zeta^2}} = {fmt_number(wd)} \text{{ rad/s}}")
+        st.markdown("Os polos dominantes de malha fechada são calculados por $s_d = -\zeta\omega_n \pm j\omega_d$:")
+        st.latex(rf"s_d = -({fmt_number(zeta)})({fmt_number(wn)}) + j({fmt_number(wd)}) = {fmt_complex(sd)}")
+
     else:
-        num_c = clean_coeffs(np.polymul([1, z], [1, z]))
-        den_c = [1, 0]
-        st.latex(rf"G_c(s) = K_c \frac{{(s + {fmt_number(z)})^2}}{{s}}")
+        c1, c2 = st.columns(2)
+        with c1:
+            sd_real = st.number_input("Parte Real", value=-1.0, step=0.1)
+        with c2:
+            sd_imag = st.number_input("Parte Imag (positiva)", value=1.0, step=0.1)
+        sd = complex(sd_real, abs(sd_imag))
+        st.markdown("Polo dominante de malha fechada definido manualmente:")
+        st.latex(rf"s_d = {fmt_complex(sd)}")
+
+    # 2. Configurar os polos base do controlador
+    if ctrl_type == "PD":
+        st.markdown("#### 2) Verificar se o objetivo não pode ser atingido com um controlador Proporcional")
+        poles_c = []
+    elif ctrl_type == "PI":
+        st.markdown("#### 2) Determinar o zero de modo que a condição de ângulo seja satisfeita")
+        poles_c = [0.0]
+    else:
+        st.markdown("#### 2) Localizar o polo na origem e os zeros de modo que a condição de ângulo seja satisfeita")
+        poles_c = [0.0]
+
+    # 3. Condição de Ângulo
+    sys_poles = list(poles) + poles_c
+    sys_zeros = list(zeros)
+    
+    st.markdown("#### 3) Determinar o zero utilizando a condição de ângulo")
+    st.markdown("Cálculo geométrico dos ângulos desde as singularidades de malha aberta até $s_d$:")
+    
+    pole_angles = []
+    for i, p in enumerate(sys_poles, 1):
+        re_diff = sd.real - np.real(p)
+        im_diff = sd.imag - np.imag(p)
+        ang = np.degrees(np.angle(sd - p))
+        pole_angles.append(ang)
+        st.latex(rf"\theta_{{p{i}}} = \angle(s_d - p_{i}) = \text{{ATAN2}}({fmt_number(im_diff)}, {fmt_number(re_diff)}) = {fmt_number(ang)}^\circ")
         
-    new_num = clean_coeffs(np.polymul(num_ol, num_c))
-    new_den = clean_coeffs(np.polymul(den_ol, den_c))
-    new_zeros = np.roots(new_num) if len(new_num) > 1 else np.array([])
-    new_poles = np.roots(new_den)
+    zero_angles = []
+    for i, z in enumerate(sys_zeros, 1):
+        re_diff = sd.real - np.real(z)
+        im_diff = sd.imag - np.imag(z)
+        ang = np.degrees(np.angle(sd - z))
+        zero_angles.append(ang)
+        st.latex(rf"\theta_{{z{i}}} = \angle(s_d - z_{i}) = \text{{ATAN2}}({fmt_number(im_diff)}, {fmt_number(re_diff)}) = {fmt_number(ang)}^\circ")
+
+    sum_p_text = " + ".join([f"{fmt_number(a)}^\circ" for a in pole_angles]) if pole_angles else "0^\circ"
+    sum_z_text = " + ".join([f"{fmt_number(a)}^\circ" for a in zero_angles]) if zero_angles else "0^\circ"
+    angle_sys = sum(zero_angles) - sum(pole_angles)
     
-    gain, prod_p, prod_z = point_gain(sd, new_poles, new_zeros)
-    st.markdown("Pela condição de módulo aplicada ao sistema já compensado:")
-    st.latex(rf"K_c = \frac{{1}}{{|P_{{comp}}(s_d)|}} = {fmt_number(gain)}")
+    st.markdown("Avaliando o ângulo total da malha aberta original no ponto $s_d$:")
+    st.latex(rf"\angle P(s_d) = \sum \theta_z - \sum \theta_p = ({sum_z_text}) - ({sum_p_text})")
+    st.latex(rf"\angle P(s_d) = {fmt_number(angle_sys)}^\circ")
     
-    st.markdown("### LGR do Sistema Compensado")
-    sys_comp = ct.TransferFunction(new_num, new_den)
-    fig, ax = plt.subplots(figsize=(9, 5.8))
-    setup_axis(ax)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        rt, _ = ct.root_locus(sys_comp, plot=False)
-    for branch in range(rt.shape[1]):
-        ax.plot(rt[:, branch].real, rt[:, branch].imag, color="#2563eb", linewidth=2)
-    plot_poles_zeros(ax, new_poles, new_zeros)
+    theta_total = normalize_180(-180 - angle_sys)
+    if theta_total < 0: theta_total += 360
     
-    ax.scatter([sd.real], [sd.imag], marker="*", color="#b91c1c", s=150, zorder=5, label="Polo Desejado (s_d)")
-    ax.scatter([sd.real], [-sd.imag], marker="*", color="#b91c1c", s=150, zorder=5)
+    if ctrl_type in ["PD", "PI"]:
+        phi = theta_total
+        st.markdown("O ângulo a compensar pelo zero do controlador é:")
+        st.latex(rf"\phi = 180^\circ - \text{{deficiência angular}} \Rightarrow \phi = {fmt_number(phi)}^\circ")
+        if phi <= 0 or phi >= 180:
+            status_line("Erro: A especificação angular inviabiliza a colocação geométrica do zero.", "warning")
+            return
+        z_val = abs(sd.real) + sd.imag / np.tan(np.radians(phi))
+        st.latex(rf"\text{{Parâmetro }} z = \frac{{\omega_d}}{{\tan(\phi)}} + |\sigma_d| = {fmt_number(z_val)}")
+        st.markdown(rf"Isso significa que a raiz geométrica do controlador fica no ponto $s = -z = -{fmt_number(z_val)}$.")
+        zeros_c = [-z_val]
+    else: 
+        phi = theta_total / 2
+        st.markdown("Como os zeros são idênticos, a contribuição divide-se por dois:")
+        st.latex(rf"\phi = \frac{{{fmt_number(theta_total)}^\circ}}{{2}} = {fmt_number(phi)}^\circ")
+        if phi <= 0 or phi >= 180:
+            status_line("Erro: Impossível localizar o par de zeros.", "warning")
+            return
+        z_val = abs(sd.real) + sd.imag / np.tan(np.radians(phi))
+        st.latex(rf"\text{{Parâmetro }} z = \frac{{\omega_d}}{{\tan(\phi)}} + |\sigma_d| = {fmt_number(z_val)}")
+        st.markdown(rf"As raízes geométricas ficam em $s = -z = -{fmt_number(z_val)}$.")
+        zeros_c = [-z_val, -z_val]
+
+    # 4. Condição de Módulo com ajuste do ganho da planta
+    st.markdown("#### 4) Calcular o ganho total requerido, aplicando a condição de módulo")
+    st.markdown("Cálculo discriminado do módulo dos vetores (distâncias reais) até $s_d$:")
     
-    xlim, ylim = default_limits(new_poles, new_zeros)
-    all_re = rt.real[np.isfinite(rt.real)]
-    all_im = rt.imag[np.isfinite(rt.imag)]
-    if all_re.size and all_im.size:
-        xlim = (min(xlim[0], np.nanpercentile(all_re, 2) - 1, sd.real - 1), max(xlim[1], np.nanpercentile(all_re, 98) + 1, sd.real + 1))
-        ylim = (min(ylim[0], np.nanpercentile(all_im, 2) - 1, -sd.imag - 1), max(ylim[1], np.nanpercentile(all_im, 98) + 1, sd.imag + 1))
-    ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
-    ax.set_title(f"Lugar Geométrico das Raízes (Com controlador {ctrl_type})")
-    ax.legend(frameon=True)
-    st.pyplot(fig)
+    all_poles = sys_poles
+    all_zeros = sys_zeros + zeros_c
+    
+    p_dists = []
+    for i, p in enumerate(all_poles, 1):
+        d = abs(sd - p)
+        p_dists.append(d)
+        st.latex(rf"|s_d - p_{i}| = \sqrt{{ ({fmt_number(sd.real)} - ({fmt_number(np.real(p))}))^2 + ({fmt_number(sd.imag)} - ({fmt_number(np.imag(p))}))^2 }} = {fmt_number(d)}")
+
+    z_dists = []
+    for i, z in enumerate(all_zeros, 1):
+        d = abs(sd - z)
+        z_dists.append(d)
+        st.latex(rf"|s_d - z_{i}| = \sqrt{{ ({fmt_number(sd.real)} - ({fmt_number(np.real(z))}))^2 + ({fmt_number(sd.imag)} - ({fmt_number(np.imag(z))}))^2 }} = {fmt_number(d)}")
+
+    prod_p = np.prod(p_dists) if p_dists else 1.0
+    prod_z = np.prod(z_dists) if z_dists else 1.0
+    K_total = prod_p / prod_z
+    
+    # Extração automática do ganho intrínseco da malha (funciona para qualquer planta)
+    K_planta = abs(float(num_ol[0]) / float(den_ol[0]))
+    Kc = K_total / K_planta
+    
+    str_num = " \cdot ".join([fmt_number(d) for d in p_dists]) if p_dists else "1"
+    str_den = " \cdot ".join([fmt_number(d) for d in z_dists]) if z_dists else "1"
+
+    st.markdown("Aplicando o balanço de distâncias na equação geral:")
+    st.latex(rf"K_{{LGR}} = \frac{{\prod |s_d - p_j|}}{{\prod |s_d - z_i|}} = \frac{{{str_num}}}{{{str_den}}} = {fmt_number(K_total)}")
+    st.markdown("Como a malha aberta possui um ganho multiplicador inerente, isolamos o ganho do controlador:")
+    st.latex(rf"K_c = \frac{{K_{{LGR}}}}{{K_{{planta}}}} = \frac{{{fmt_number(K_total)}}}{{{fmt_number(K_planta)}}} = {fmt_number(Kc)}")
+
+    # 5. Parâmetros Finais do Controlador (Kp, Kd, Ki)
+    st.markdown("#### 5) Determinar os parâmetros finais do controlador ($K_p$, $K_d$, $K_i$)")
+    st.markdown("Expandindo a função de transferência do controlador para a sua forma paralela canónica:")
+    
+    if ctrl_type == "PD":
+        Kp = Kc * z_val
+        Kd = Kc
+        st.latex(rf"G_c(s) = K_c(s + z) = {fmt_number(Kc)}(s + {fmt_number(z_val)}) = {fmt_number(Kd)}s + {fmt_number(Kp)}")
+        st.latex(rf"K_p = K_c \cdot z = {fmt_number(Kp)}")
+        st.latex(rf"K_d = K_c = {fmt_number(Kd)}")
+    
+    elif ctrl_type == "PI":
+        Kp = Kc
+        Ki = Kc * z_val
+        st.latex(rf"G_c(s) = K_c \frac{{(s + z)}}{{s}} = \frac{{{fmt_number(Kc)}(s + {fmt_number(z_val)})}}{{s}} = {fmt_number(Kp)} + \frac{{{fmt_number(Ki)}}}{{s}}")
+        st.latex(rf"K_p = K_c = {fmt_number(Kp)}")
+        st.latex(rf"K_i = K_c \cdot z = {fmt_number(Ki)}")
+        
+    else: # PID
+        Kp = 2 * Kc * z_val
+        Kd = Kc
+        Ki = Kc * (z_val**2)
+        st.latex(rf"G_c(s) = K_c \frac{{(s + z)^2}}{{s}} = \frac{{{fmt_number(Kc)}(s^2 + {fmt_number(2*z_val)}s + {fmt_number(z_val**2)})}}{{s}}")
+        st.latex(rf"G_c(s) = {fmt_number(Kd)}s + {fmt_number(Kp)} + \frac{{{fmt_number(Ki)}}}{{s}}")
+        st.latex(rf"K_p = 2 \cdot K_c \cdot z = {fmt_number(Kp)}")
+        st.latex(rf"K_d = K_c = {fmt_number(Kd)}")
+        st.latex(rf"K_i = K_c \cdot z^2 = {fmt_number(Ki)}")
+
+    # 6. Simulação e Ajuste Fino
+    st.markdown("#### 6) Simular o sistema e observar a resposta")
+    
+    adj_col1, adj_col2 = st.columns(2)
+    with adj_col1:
+        kc_fine = st.slider("Ganho ($K_c$)", min_value=0.0, max_value=float(Kc*4), value=float(Kc), step=0.05)
+    with adj_col2:
+        z_fine = st.slider("Zero ($z$)", min_value=0.0, max_value=float(z_val*4), value=float(z_val), step=0.05)
+
+    if ctrl_type in ["PD", "PI"]:
+        num_c_fine = [1, z_fine]
+    else:
+        num_c_fine = clean_coeffs(np.polymul([1, z_fine], [1, z_fine]))
+        
+    den_c_fine = [1, 0] if ctrl_type in ["PI", "PID"] else [1]
+        
+    G_planta = ct.TransferFunction(num_g, den_g)
+    H_sensor = ct.TransferFunction(num_h, den_h)
+    sys_cl_uncomp = ct.feedback(G_planta, H_sensor)
+    
+    G_controlador = ct.TransferFunction(num_c_fine, den_c_fine) * kc_fine
+    sys_cl_comp = ct.feedback(G_controlador * G_planta, H_sensor)
+
+    # Determinar janela temporal de simulação dinâmica em função da raiz
+    t_sim_end = max(10, 4 / abs(sd.real) * 2) if abs(sd.real) > 1e-4 else 20
+    t_eval = np.linspace(0, float(t_sim_end), 1000)
+    
+    t_uncomp, y_uncomp = ct.step_response(sys_cl_uncomp, T=t_eval)
+    t_comp, y_comp = ct.step_response(sys_cl_comp, T=t_eval)
+
+    mp_real = (max(y_comp) - 1.0) * 100 if max(y_comp) > 1 else 0
+    tolerance = 0.05
+    if input_method == "Métricas de Desempenho (Mp e ts)" and crit == "2%":
+        tolerance = 0.02
+        
+    settled_indices = np.where(np.abs(y_comp - 1.0) > tolerance)[0]
+    ts_real = t_comp[settled_indices[-1]] if len(settled_indices) > 0 else 0
+
+    fig_time, ax_time = plt.subplots(figsize=(9, 5.5))
+    setup_axis(ax_time)
+    
+    ax_time.plot(t_uncomp, y_uncomp, color='red', linewidth=2.5, label="Sem Controlador")
+    ax_time.plot(t_comp, y_comp, color='blue', linewidth=2.5, label="Com Controlador")
+    
+    ax_time.scatter([t_comp[np.argmax(y_comp)]], [max(y_comp)], color="red", zorder=5)
+    ax_time.annotate(f"$M_P$ = {mp_real:.2f}%", (t_comp[np.argmax(y_comp)], max(y_comp)), xytext=(0, 10), textcoords="offset points", ha='center')
+    
+    if ts_real > 0:
+        ax_time.axvline(ts_real, color='red', linestyle='--', alpha=0.3)
+        ax_time.annotate(f"$t_s$ = {ts_real:.2f}seg.", (ts_real, 0.8), xytext=(5, 0), textcoords="offset points")
+        
+    ax_time.axhline(1, color='gray', linestyle='-')
+    ax_time.axhline(1 + tolerance, color='cyan', linestyle='--', alpha=0.5)
+    ax_time.axhline(1 - tolerance, color='cyan', linestyle='--', alpha=0.5)
+    
+    ax_time.set_xlabel("Tempo")
+    ax_time.set_ylabel("Resposta")
+    ax_time.set_title("Resposta no Tempo")
+    ax_time.legend()
+    st.pyplot(fig_time)
 
 
 def final_plot():
