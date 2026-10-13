@@ -29,6 +29,10 @@ CUSTOM_CSS = """
     --accent-2: #b45309;
 }
 
+.block-container div[role="radiogroup"] label p {
+    color: #000000 !important;
+}
+
 .stApp {
     background:
         radial-gradient(circle at 12% 18%, rgba(15, 118, 110, 0.16), transparent 28rem),
@@ -544,6 +548,7 @@ with st.sidebar:
             "11. Condição de ângulo",
             "12. Cálculo de K",
             "13. Projeto de Controlador",
+            "14. Discretização",
             "Gráfico completo",
             "Todos os passos",
         ],
@@ -876,14 +881,13 @@ def step_11():
 def step_12():
     gain, prod_p, prod_z = point_gain(s_i, poles, zeros)
     _, _, angle = point_angle(s_i, poles, zeros)
-    st.markdown("Quando o ponto satisfaz a condição de ângulo, o ganho vem da condição de módulo[cite: 1].")
-    st.latex(r"|KP(s_i)| = 1")
+    st.markdown("Quando o ponto satisfaz a condição de ângulo, o ganho vem da condição de módulo.")
+    st.latex(r"|KP(s'_i)| = 1")
     st.latex(rf"K = \frac{{1}}{{|P(s_i)|}} = \frac{{\prod |s_i-p_j|}}{{\prod |s_i-z_i|}}")
     st.latex(rf"K = \frac{{{fmt_number(prod_p)}}}{{{fmt_number(prod_z)}}} = {fmt_number(gain)}")
     if not np.isclose(abs(angle), 180, atol=2.0):
         status_line("Como o ponto não passou no passo 11, este K é apenas o valor de módulo, não confirma pertencimento ao LGR.", "warning")
-
-
+        
 def step_13():
     st.markdown("### Projeto de Controladores pelo Método do LGR")
     
@@ -1137,6 +1141,119 @@ def step_13():
     st.pyplot(fig_time)
 
 
+def step_14():
+    st.markdown("### 14. Aproximação Discretizada")
+    st.markdown("A discretização é feita pela substituição algébrica do operador $s$ e posterior expansão dos polinómios.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Função Contínua $F(s)$ a discretizar:**")
+        num_input = st.text_input("Numerador de F(s)", "7.58 30.32 22.74", key="num_disc")
+        den_input = st.text_input("Denominador de F(s)", "1 9.81 31.67 56.12 28.1", key="den_disc")
+    with col2:
+        st.markdown("**Parâmetros de Amostragem:**")
+        T = st.number_input("Período de amostragem T (s)", value=1.0, step=0.1)
+        method = st.selectbox("Método de Discretização", [
+            "Euler Direto / Avanço (Forward)",
+            "Euler Indireto / Atraso (Backward)",
+            "Tustin (Bilinear)"
+        ])
+        
+    try:
+        num_coeffs = parse_coeffs(num_input, "Numerador")
+        den_coeffs = parse_coeffs(den_input, "Denominador")
+    except Exception as e:
+        status_line(str(e), "warning")
+        return
+        
+    s, z = sp.symbols('s z')
+    
+    Num_s = sum(float(c) * s**(len(num_coeffs)-1-i) for i, c in enumerate(num_coeffs))
+    Den_s = sum(float(c) * s**(len(den_coeffs)-1-i) for i, c in enumerate(den_coeffs))
+    
+    st.markdown("---")
+    st.markdown("**I. Função de transferência no domínio contínuo:**")
+    # Utilizando o fmt_poly em vez do nsimplify para forçar a exibição em decimais
+    st.latex(rf"F(s) = \frac{{{fmt_poly(num_coeffs, digits=5)}}}{{{fmt_poly(den_coeffs, digits=5)}}}")
+    
+    # Escolher a equação de substituição e preparar a formatação
+    if method == "Euler Direto / Avanço (Forward)":
+        eq_s = (z - 1) / T
+        st.markdown("**II. Aplicando a substituição pelo método de Euler Direto:**")
+        if abs(T - 1.0) < TOL:
+            eq_latex = r"(z - 1)"
+        else:
+            eq_latex = rf"\left(\frac{{z - 1}}{{{fmt_number(T)}}}\right)"
+            
+    elif method == "Euler Indireto / Atraso (Backward)":
+        eq_s = (z - 1) / (T * z)
+        st.markdown("**II. Aplicando a substituição pelo método de Euler Indireto:**")
+        if abs(T - 1.0) < TOL:
+            eq_latex = r"\left(\frac{{z - 1}}{{z}}\right)"
+        else:
+            eq_latex = rf"\left(\frac{{z - 1}}{{{fmt_number(T)}z}}\right)"
+            
+    else:
+        eq_s = (2/T) * ((z - 1)/(z + 1))
+        st.markdown("**II. Aplicando a substituição pelo método de Tustin (Bilinear):**")
+        eq_latex = rf"\left({fmt_number(2/T)}\frac{{z - 1}}{{z + 1}}\right)"
+        
+    st.latex(rf"s = {sp.latex(sp.nsimplify(eq_s, tolerance=1e-4))}")
+    
+    # Função interna para gerar a string formatada igual à resolução manual
+    def generate_sub_str(coeffs, eq_str):
+        degree = len(coeffs) - 1
+        terms = []
+        for i, c in enumerate(coeffs):
+            if abs(c) < TOL:
+                continue
+            power = degree - i
+            c_str = fmt_number(c)
+            if power == 0:
+                terms.append(c_str)
+            elif power == 1:
+                terms.append(rf"{c_str}{eq_str}")
+            else:
+                terms.append(rf"{c_str}{eq_str}^{{{power}}}")
+        if not terms: return "0"
+        return " + ".join(terms).replace("+ -", "- ")
+
+    N_z_raw_str = generate_sub_str(num_coeffs, eq_latex)
+    D_z_raw_str = generate_sub_str(den_coeffs, eq_latex)
+    
+    st.markdown("**III. Substituir $s$ na equação e manter os termos agrupados:**")
+    st.latex(rf"N(z) = {N_z_raw_str}")
+    st.latex(rf"D(z) = {D_z_raw_str}")
+    
+    # Fazer a álgebra completa para expandir os termos
+    F_s = Num_s / Den_s
+    F_z_raw = F_s.subs(s, eq_s)
+    F_z_simp = sp.cancel(sp.simplify(F_z_raw))
+    n_z, d_z = sp.fraction(F_z_simp)
+    
+    # Normalizar para o coeficiente de maior grau do denominador ser 1
+    d_poly = sp.Poly(d_z, z)
+    lead_coeff = d_poly.LC()
+    
+    if lead_coeff != 0:
+        n_z = sp.expand(n_z / lead_coeff)
+        d_z = sp.expand(d_z / lead_coeff)
+    else:
+        n_z = sp.expand(n_z)
+        d_z = sp.expand(d_z)
+        
+    # Avaliar para exibir em formato decimal com 5 casas de precisão
+    n_z_eval = n_z.evalf(5)
+    d_z_eval = d_z.evalf(5)
+    
+    st.markdown("**IV. Expansão algébrica completa dos polinómios $N(z)$ e $D(z)$:**")
+    st.latex(rf"N(z) = {sp.latex(n_z_eval)}")
+    st.latex(rf"D(z) = {sp.latex(d_z_eval)}")
+    
+    st.markdown("**V. Função de transferência discretizada final:**")
+    st.latex(rf"F(z) = \frac{{{sp.latex(n_z_eval)}}}{{{sp.latex(d_z_eval)}}}")
+
+
 def final_plot():
     st.markdown("O traçado completo é gerado variando `K` e calculando as raízes do polinômio característico.")
     fig, ax = plt.subplots(figsize=(9, 5.8))
@@ -1174,6 +1291,7 @@ STEPS = {
     "11. Condição de ângulo": ("Testar se um ponto pertence ao LGR", step_11),
     "12. Cálculo de K": ("Calcular o ganho pelo módulo", step_12),
     "13. Projeto de Controlador": ("Projeto de Controlador (PD, PI, PID)", step_13),
+    "14. Discretização": ("Aproximação Discretizada (Euler/Tustin)", step_14),
 }
 
 
