@@ -1,5 +1,4 @@
 import warnings
-
 import control as ct
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +10,7 @@ TOL = 1e-7
 
 
 st.set_page_config(
-    page_title="LGR - Sistema de Controle",
+    page_title="Projeto de Controladores",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -140,48 +139,6 @@ div[data-testid="stMetric"] {
 
 .block-container [data-testid="stMetric"] {
     min-height: 6.2rem;
-}
-
-.routh-wrap {
-    margin: 0.9rem 0 1.2rem;
-    overflow-x: auto;
-}
-
-.routh-table {
-    border-collapse: collapse;
-    min-width: 520px;
-    max-width: 760px;
-    background: rgba(255, 253, 248, 0.92);
-    color: var(--ink);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 10px 22px rgba(31, 41, 55, 0.08);
-}
-
-.routh-table th,
-.routh-table td {
-    border: 1px solid #d8d2c7;
-    padding: 0.68rem 0.85rem;
-    text-align: center;
-    font-size: 1rem;
-}
-
-.routh-table th {
-    background: #111827;
-    color: #f9fafb;
-    font-weight: 700;
-}
-
-.routh-table td:first-child {
-    background: rgba(15, 118, 110, 0.10);
-    color: #0f766e;
-    font-weight: 760;
-    width: 5.5rem;
-}
-
-.routh-table tr:nth-child(even) td:not(:first-child) {
-    background: rgba(245, 243, 238, 0.78);
 }
 </style>
 """
@@ -320,136 +277,8 @@ def fmt_characteristic(den, num):
     return " + ".join(terms).replace("+ -", "- ") + " = 0"
 
 
-def real_roots_only(poles, zeros):
-    roots = []
-    for pole in poles:
-        if abs(pole.imag) < TOL:
-            roots.append(float(pole.real))
-    for zero in zeros:
-        if abs(zero.imag) < TOL:
-            roots.append(float(zero.real))
-    return roots
-
-
-def real_axis_intervals(poles, zeros):
-    roots = real_roots_only(poles, zeros)
-    if not roots:
-        return []
-    unique = sorted(set(round(root, 10) for root in roots), reverse=True)
-    intervals = []
-    for i, start in enumerate(unique):
-        if i + 1 < len(unique):
-            end = unique[i + 1]
-            mid = (start + end) / 2
-            label = f"{fmt_number(start)} até {fmt_number(end)}"
-        else:
-            end = None
-            mid = start - 1.0
-            label = f"{fmt_number(start)} até -\\infty"
-        count_right = sum(1 for root in roots if root > mid + TOL)
-        intervals.append(
-            {
-                "start": start,
-                "end": end,
-                "mid": mid,
-                "count_right": count_right,
-                "is_lgr": count_right % 2 == 1,
-                "label": label,
-            }
-        )
-    return intervals
-
-
-def is_on_real_lgr(x, poles, zeros):
-    roots = real_roots_only(poles, zeros)
-    if not roots:
-        return False
-    if any(abs(x - root) < 1e-5 for root in roots):
-        return True
-    return sum(1 for root in roots if root > x + TOL) % 2 == 1
-
-
-def k_of_s(s, den, num):
-    numerator = -np.polyval(den, s)
-    denominator = np.polyval(num, s)
-    if abs(denominator) < TOL:
-        return np.nan
-    return numerator / denominator
-
-
-def breakaway_candidates(den, num, poles, zeros):
-    d_den = np.polyder(den)
-    d_num = np.polyder(num)
-    equation = np.polysub(np.polymul(d_den, num), np.polymul(den, d_num))
-    equation = clean_coeffs(equation)
-    roots = np.roots(equation) if len(equation) > 1 else np.array([])
-    candidates = []
-    for root in roots:
-        if abs(root.imag) < 1e-6:
-            x = float(root.real)
-            gain = k_of_s(x, den, num)
-            if np.isfinite(gain):
-                candidates.append(
-                    {
-                        "s": x,
-                        "K": float(np.real(gain)),
-                        "valid": float(np.real(gain)) > 0 and is_on_real_lgr(x, poles, zeros),
-                    }
-                )
-    candidates.sort(key=lambda item: item["s"])
-    return equation, candidates
-
-
-def safe_margin(sys):
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            values = ct.margin(sys)
-        gm = float(values[0])
-        wg = float(values[2])
-        if np.isfinite(gm) and gm > 0 and np.isfinite(wg) and wg > 0:
-            return gm, wg
-    except Exception:
-        pass
-    return None, None
-
-def angles_to_target(target, roots):
-    rows = []
-    for root in roots:
-        if abs(target - root) > 1e-6:
-            angle = np.degrees(np.angle(target - root))
-            rows.append((root, angle))
-    return rows
-
-
 def normalize_180(angle):
     return ((angle + 180) % 360) - 180
-
-
-def departure_angle(target, poles, zeros):
-    zero_sum = sum(np.degrees(np.angle(target - zero)) for zero in zeros if abs(target - zero) > 1e-6)
-    pole_sum = sum(np.degrees(np.angle(target - pole)) for pole in poles if abs(target - pole) > 1e-6)
-    return (180 + zero_sum - pole_sum) % 360
-
-
-def arrival_angle(target, poles, zeros):
-    pole_sum = sum(np.degrees(np.angle(target - pole)) for pole in poles if abs(target - pole) > 1e-6)
-    zero_sum = sum(np.degrees(np.angle(target - zero)) for zero in zeros if abs(target - zero) > 1e-6)
-    return (180 + pole_sum - zero_sum) % 360
-
-
-def point_angle(point, poles, zeros):
-    zero_sum = sum(np.degrees(np.angle(point - zero)) for zero in zeros)
-    pole_sum = sum(np.degrees(np.angle(point - pole)) for pole in poles)
-    return zero_sum, pole_sum, normalize_180(pole_sum - zero_sum)
-
-
-def point_gain(point, poles, zeros):
-    prod_p = float(np.prod([abs(point - pole) for pole in poles])) if len(poles) else 1.0
-    prod_z = float(np.prod([abs(point - zero) for zero in zeros])) if len(zeros) else 1.0
-    if prod_z < TOL:
-        return np.inf, prod_p, prod_z
-    return prod_p / prod_z, prod_p, prod_z
 
 
 def setup_axis(ax, xlim=None, ylim=None):
@@ -491,31 +320,6 @@ def status_line(text, kind="ok"):
     st.markdown(f'<div class="{cls}">{text}</div>', unsafe_allow_html=True)
 
 
-def render_routh_table(rows):
-    html_rows = []
-    for row in rows:
-        label = row[0]
-        col1 = row[1] if len(row) > 1 else ""
-        col2 = row[2] if len(row) > 2 else ""
-        col3 = row[3] if len(row) > 3 else ""
-        html_rows.append(
-            "<tr>"
-            f"<td>{label}</td>"
-            f"<td>{col1}</td>"
-            f"<td>{col2}</td>"
-            f"<td>{col3}</td>"
-            "</tr>"
-        )
-    html = (
-        '<div class="routh-wrap">'
-        '<table class="routh-table">'
-        "<thead><tr><th>Linha</th><th>1a coluna</th><th>2a coluna</th><th>3a coluna</th></tr></thead>"
-        f"<tbody>{''.join(html_rows)}</tbody>"
-        "</table></div>"
-    )
-    st.markdown(html, unsafe_allow_html=True)
-
-
 def show_step(number, title, body_func):
     st.markdown(
         f"""
@@ -534,22 +338,11 @@ with st.sidebar:
     view = st.radio(
         "Escolha a etapa",
         [
-            "Visão geral",
             "1. Polinômio característico",
             "2. Fatoração de P(s)",
             "3. Polos e zeros",
-            "4. Eixo real",
-            "5. Lugares separados",
-            "6. Simetria",
-            "7. Assíntotas",
-            "8. Ponto de saída",
-            "9. Routh-Hurwitz",
-            "10. Ângulos de partida",
-            "11. Condição de ângulo",
-            "12. Cálculo de K",
-            "13. Projeto de Controlador",
-            "14. Discretização",
-            "Gráfico completo",
+            "4. Projeto de Controlador",
+            "5. Discretização",
             "Todos os passos",
         ],
         label_visibility="collapsed",
@@ -559,11 +352,7 @@ with st.sidebar:
 st.markdown(
     """
     <div class="hero">
-        <div class="hero-title">Esboço do Lugar Geométrico das Raízes</div>
-        <div class="hero-subtitle">
-            Aplicação para montar o LGR seguindo a linha da apostila: sistema em malha aberta,
-            memória de cálculo, gráficos intermediários e teste de pontos.
-        </div>
+        <div class="hero-title">Projeto de Controladores</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -571,7 +360,7 @@ st.markdown(
 
 
 st.markdown("### Definição do sistema")
-input_col_1, input_col_2, input_col_3 = st.columns([1.1, 1.1, 0.8])
+input_col_1, input_col_2 = st.columns([1, 1])
 with input_col_1:
     st.markdown("**Planta sem o ganho K: G(s)**")
     num_g_input = st.text_input("Numerador de G(s)", "1")
@@ -580,10 +369,6 @@ with input_col_2:
     st.markdown("**Realimentação: H(s)**")
     num_h_input = st.text_input("Numerador de H(s)", "1")
     den_h_input = st.text_input("Denominador de H(s)", "1 4")
-with input_col_3:
-    st.markdown("**Ponto de teste**")
-    s_real = st.number_input("Parte real de s_i", value=-2.0, step=0.25, format="%.4f")
-    s_imag = st.number_input("Parte imaginária de s_i", value=3.0, step=0.25, format="%.4f")
 
 
 try:
@@ -598,7 +383,6 @@ try:
     poles = np.roots(den_ol)
     nz = len(zeros)
     npoles = len(poles)
-    s_i = complex(s_real, s_imag)
 except Exception as exc:
     st.error(str(exc))
     st.stop()
@@ -608,8 +392,6 @@ summary_1, summary_2, summary_3, summary_4 = st.columns(4)
 summary_1.metric("Polos", npoles)
 summary_2.metric("Zeros", nz)
 summary_3.metric("Assíntotas", max(npoles - nz, 0))
-summary_4.metric("Ramos do LGR", npoles)
-
 
 def step_1():
     st.markdown("O ganho ajustável multiplica a malha aberta. Primeiro formamos:")
@@ -634,7 +416,7 @@ def step_2():
 
 
 def step_3():
-    st.markdown("Marcamos `X` nos polos e `O` nos zeros. O LGR começa nos polos quando `K = 0`.")
+    st.markdown("Marcamos `X` nos polos e `O` nos zeros. `K = 0`.")
     xlim, ylim = default_limits(poles, zeros)
     fig, ax = plt.subplots(figsize=(7.5, 4.6))
     setup_axis(ax, xlim, ylim)
@@ -645,250 +427,6 @@ def step_3():
 
 
 def step_4():
-    st.markdown("Um trecho do eixo real pertence ao LGR quando há número ímpar de polos e zeros reais à direita do trecho.")
-    intervals = real_axis_intervals(poles, zeros)
-    if not intervals:
-        status_line("Este passo não gera trecho no eixo real porque não há polos ou zeros reais.", "warning")
-        return
-    for item in intervals:
-        parity = "ímpar" if item["is_lgr"] else "par"
-        result = "pertence ao LGR" if item["is_lgr"] else "não pertence ao LGR"
-        st.latex(rf"\text{{Intervalo }} {item['label']}: {item['count_right']} \text{{ polos/zeros reais à direita }} ({parity}) \Rightarrow {result}")
-
-    roots = real_roots_only(poles, zeros)
-    min_x = min(roots) - 3
-    max_x = max(roots) + 2
-    fig, ax = plt.subplots(figsize=(8, 2.8))
-    setup_axis(ax, (min_x, max_x), (-1.2, 1.2))
-    ax.set_yticks([])
-    for item in intervals:
-        if item["is_lgr"]:
-            start = item["start"]
-            end = item["end"] if item["end"] is not None else min_x
-            ax.plot([start, end], [0, 0], color="#b45309", linewidth=5, solid_capstyle="round", zorder=2)
-    plot_poles_zeros(ax, poles, zeros, label=False)
-    ax.set_title("Trechos válidos no eixo real")
-    st.pyplot(fig)
-
-
-def step_5():
-    st.markdown("O número de lugares separados é o número de ramos que saem dos polos de malha aberta.")
-    st.latex(rf"LS = n_p = {npoles}")
-    if nz > npoles:
-        status_line("O sistema tem mais zeros que polos; para LGR clássico, normalmente se trabalha com função própria.", "warning")
-
-
-def step_6():
-    st.markdown("Como os coeficientes do polinômio característico são reais, as raízes complexas aparecem em pares conjugados.")
-    st.latex(r"\text{Se } s = \sigma + j\omega \text{ pertence ao LGR, então } \sigma - j\omega \text{ também pertence.}")
-    status_line("O LGR é simétrico em relação ao eixo real.")
-
-
-def step_7():
-    if npoles <= nz:
-        status_line(r"Este passo não é necessário porque não há zeros infinitos: \(n_p \leq n_z\).", "warning")
-        return
-    count = npoles - nz
-    sigma_a = (sum(p.real for p in poles) - sum(z.real for z in zeros)) / count
-    poles_sum = " + ".join(f"({fmt_number(p.real)})" for p in poles)
-    zeros_sum = " + ".join(f"({fmt_number(z.real)})" for z in zeros) if nz else "0"
-    st.markdown("As assíntotas aparecem porque alguns ramos terminam em zeros no infinito.")
-    st.latex(rf"n_p - n_z = {npoles} - {nz} = {count}")
-    st.latex(rf"\sigma_A = \frac{{\sum p_j - \sum z_i}}{{n_p - n_z}} = \frac{{{poles_sum} - ({zeros_sum})}}{{{count}}} = {fmt_number(sigma_a)}")
-    angles = [(2 * q + 1) * 180 / count for q in range(count)]
-    for q, angle in enumerate(angles):
-        st.latex(rf"\phi_A(q={q}) = \frac{{(2q+1)180^\circ}}{{{count}}} = {fmt_number(angle)}^\circ")
-
-    xlim, ylim = default_limits(poles, zeros)
-    span = max(xlim[1] - xlim[0], ylim[1] - ylim[0], 8)
-    fig, ax = plt.subplots(figsize=(7.5, 4.8))
-    setup_axis(ax, (min(xlim[0], sigma_a - span * 0.7), max(xlim[1], sigma_a + span * 0.7)), (-span * 0.55, span * 0.55))
-    plot_poles_zeros(ax, poles, zeros)
-    ax.scatter([sigma_a], [0], marker="s", color="#b45309", s=80, label="Centroide")
-    for angle in angles:
-        theta = np.radians(angle)
-        ax.plot([sigma_a, sigma_a + span * np.cos(theta)], [0, span * np.sin(theta)], color="#334155", linestyle="--", linewidth=1.4)
-        ax.text(sigma_a + (span * 0.42) * np.cos(theta), (span * 0.42) * np.sin(theta), f"{fmt_number(angle)}", color="#111827")
-    ax.set_title("Assíntotas do LGR")
-    ax.legend(frameon=True)
-    st.pyplot(fig)
-
-
-def step_8():
-    equation, candidates = breakaway_candidates(den_ol, num_ol, poles, zeros)
-    display_equation = -equation
-    st.markdown("No eixo real, o ponto de saída ou entrada vem de `K(s)` e de sua derivada.")
-    st.latex(rf"K(s) = -\frac{{D(s)}}{{N(s)}} = -\frac{{{fmt_poly(den_ol)}}}{{{fmt_poly(num_ol)}}}")
-    st.latex(rf"\frac{{dK}}{{ds}} = 0 \Rightarrow {fmt_poly(display_equation)} = 0")
-    if not candidates:
-        status_line("A derivada não encontrou candidatos reais para ponto de saída ou chegada.", "warning")
-        return
-    valid = [item for item in candidates if item["valid"]]
-    for item in candidates:
-        verdict = "válido" if item["valid"] else "descartado"
-        st.latex(rf"s = {fmt_number(item['s'])},\quad K = {fmt_number(item['K'])}\quad \Rightarrow\quad {verdict}")
-    if not valid:
-        status_line("Há candidatos reais, mas nenhum está em trecho de LGR com K positivo.", "warning")
-        return
-
-    roots = real_roots_only(poles, zeros)
-    min_x = min(min(roots) - 1.5, min(item["s"] for item in valid) - 1.5)
-    max_x = max(max(roots) + 1.0, max(item["s"] for item in valid) + 1.5)
-    x_values = np.linspace(min_x, max_x, 500)
-    y_values = np.array([np.real(k_of_s(x, den_ol, num_ol)) for x in x_values])
-    finite_abs = np.abs(y_values[np.isfinite(y_values)])
-    if finite_abs.size:
-        cap = np.nanpercentile(finite_abs, 96)
-        y_values[np.abs(y_values) > cap] = np.nan
-    fig, ax = plt.subplots(figsize=(8, 3.6))
-    ax.set_facecolor("#fffdf8")
-    ax.plot(x_values, y_values, color="#b91c1c", linewidth=2)
-    for item in valid:
-        ax.scatter([item["s"]], [item["K"]], color="#0f766e", s=70, zorder=4)
-        ax.annotate(f"({fmt_number(item['s'])}; {fmt_number(item['K'])})", (item["s"], item["K"]), xytext=(8, 9), textcoords="offset points")
-    ax.axhline(0, color="#5f6671", linewidth=1)
-    ax.grid(True, color="#d8d2c7", linestyle="--")
-    ax.set_xlabel("s")
-    ax.set_ylabel("K(s)")
-    ax.set_title("Curva K(s) para localizar saída/entrada")
-    st.pyplot(fig)
-    
-
-def generate_symbolic_routh(den, num):
-    K = sp.Symbol('K', real=True)
-    s = sp.Symbol('s')
-    
-    # Cria os polinômios a partir das listas de coeficientes
-    D = sum(float(c) * s**(len(den)-1-i) for i, c in enumerate(den))
-    N = sum(float(c) * s**(len(num)-1-i) for i, c in enumerate(num))
-    
-    # Coeficientes da equação D(s) + K*N(s) = 0
-    char_poly = sp.Poly(D + K * N, s)
-    coeffs = char_poly.all_coeffs()
-    deg = len(coeffs) - 1
-    
-    # Prepara a matriz
-    cols = (deg + 2) // 2
-    table = [[sp.S(0)] * cols for _ in range(deg + 1)]
-    
-    # Preenche as linhas s^n e s^(n-1), transformando 4.0 em 4 (limpeza)
-    for i, c in enumerate(coeffs[0::2]):
-        table[0][i] = sp.nsimplify(c, tolerance=1e-5) 
-    for i, c in enumerate(coeffs[1::2]):
-        table[1][i] = sp.nsimplify(c, tolerance=1e-5)
-        
-    # Calcula as linhas inferiores algebricamente
-    for i in range(2, deg + 1):
-        for j in range(cols - 1):
-            pivot = table[i-1][0]
-            if pivot == 0:
-                pivot = sp.Symbol(r'\epsilon') # Evita divisão por zero
-            
-            # Determinante de Routh
-            val = (pivot * table[i-2][j+1] - table[i-2][0] * table[i-1][j+1]) / pivot
-            table[i][j] = sp.cancel(sp.simplify(val)) # Simplifica a expressão com K
-            
-    return table, deg
-
-
-def step_9():
-    st.markdown("O cruzamento do eixo imaginário ocorre quando o polinômio característico fica marginalmente estável.")
-    st.latex(rf"{fmt_characteristic(den_ol, num_ol)}")
-    
-    # Gera e exibe a Tabela Simbólica usando o ambiente nativo array do LaTeX
-    try:
-        table, deg = generate_symbolic_routh(den_ol, num_ol)
-        
-        latex_str = r"\begin{array}{c|ccc}" + "\n"
-        latex_str += r"\text{Linha} & \text{1a coluna} & \text{2a coluna} & \text{3a coluna} \\ \hline" + "\n"
-        
-        for i in range(deg + 1):
-            label = f"s^{{{deg - i}}}"
-            cols = []
-            for val in table[i]:
-                if val == 0:
-                    cols.append("0")
-                else:
-                    cols.append(sp.latex(val))
-            
-            # Preenche com espaços vazios para garantir sempre 3 colunas de cálculo na exibição
-            cols = cols[:3] + [""] * (3 - len(cols[:3]))
-            row_str = f"{label} & {cols[0]} & {cols[1]} & {cols[2]} \\\\"
-            latex_str += row_str + "\n"
-            
-        latex_str += r"\end{array}"
-        
-        st.markdown("**Tabela de Routh-Hurwitz:**")
-        st.latex(latex_str)
-        
-    except Exception as e:
-        status_line(f"Erro ao gerar tabela simbólica: {e}", "warning")
-        
-    # Usa a biblioteca control para achar o valor numérico do cruzamento
-    gm, wg = safe_margin(sys)
-    if gm is not None:
-        st.markdown("Avaliando o ganho limite (onde a linha de $s^1$ ou $s^0$ zera):")
-        st.latex(rf"K_{{marg}} = {fmt_number(gm)},\qquad s_{{1,2}} = \pm {fmt_number(wg)}i")
-    else:
-        status_line("Não foi encontrado cruzamento positivo do eixo imaginário para este sistema.", "warning")
-
-def step_10():
-    complex_poles = [pole for pole in poles if pole.imag > TOL]
-    complex_zeros = [zero for zero in zeros if zero.imag > TOL]
-    if not complex_poles and not complex_zeros:
-        status_line("Este passo não é necessário porque não há polos ou zeros complexos no semiplano superior.", "warning")
-        return
-    st.latex(r"\angle P(s) = 180^\circ \pm q360^\circ")
-    for index, pole in enumerate(complex_poles, start=1):
-        parts = angles_to_target(pole, poles)
-        zero_parts = angles_to_target(pole, zeros)
-        pole_text = " + ".join(fmt_number(angle) for _, angle in parts) or "0"
-        zero_text = " + ".join(fmt_number(angle) for _, angle in zero_parts) or "0"
-        theta = departure_angle(pole, poles, zeros)
-        st.markdown(f"Ângulo de partida no polo `p{index} = {fmt_complex(pole)}`:")
-        st.latex(rf"\theta = 180^\circ + ({zero_text}) - ({pole_text}) = {fmt_number(theta)}^\circ")
-
-    for index, zero in enumerate(complex_zeros, start=1):
-        theta = arrival_angle(zero, poles, zeros)
-        st.markdown(f"Ângulo de chegada no zero `z{index} = {fmt_complex(zero)}`:")
-        st.latex(rf"\theta = {fmt_number(theta)}^\circ")
-
-    target = complex_poles[0] if complex_poles else complex_zeros[0]
-    xlim, ylim = default_limits(poles, zeros)
-    fig, ax = plt.subplots(figsize=(7.5, 4.8))
-    setup_axis(ax, xlim, ylim)
-    plot_poles_zeros(ax, poles, zeros)
-    for root in list(poles) + list(zeros):
-        if abs(root - target) > 1e-6:
-            ax.annotate("", xy=(target.real, target.imag), xytext=(root.real, root.imag), arrowprops={"arrowstyle": "->", "color": "#475569", "linestyle": "dotted"})
-    ax.scatter([target.real], [target.imag], color="#b45309", s=60, zorder=5)
-    ax.set_title("Vetores usados na condição de ângulo")
-    st.pyplot(fig)
-
-
-def step_11():
-    zero_sum, pole_sum, angle = point_angle(s_i, poles, zeros)
-    st.markdown("Um ponto pertence ao LGR se a fase de `P(s_i)` for equivalente a `180 graus` módulo `360 graus`.")
-    st.latex(rf"s_i = {fmt_complex(s_i)}")
-    st.latex(rf"\angle P(s_i) = \sum \angle(s_i-p_j) - \sum \angle(s_i-z_i)")
-    st.latex(rf"\angle P(s_i) = {fmt_number(pole_sum)}^\circ - ({fmt_number(zero_sum)}^\circ) \equiv {fmt_number(angle)}^\circ")
-    if np.isclose(abs(angle), 180, atol=2.0):
-        status_line("O ponto satisfaz a condição de ângulo e pertence ao LGR.")
-    else:
-        status_line("O ponto não satisfaz a condição de ângulo para K positivo.", "warning")
-
-
-def step_12():
-    gain, prod_p, prod_z = point_gain(s_i, poles, zeros)
-    _, _, angle = point_angle(s_i, poles, zeros)
-    st.markdown("Quando o ponto satisfaz a condição de ângulo, o ganho vem da condição de módulo.")
-    st.latex(r"|KP(s'_i)| = 1")
-    st.latex(rf"K = \frac{{1}}{{|P(s_i)|}} = \frac{{\prod |s_i-p_j|}}{{\prod |s_i-z_i|}}")
-    st.latex(rf"K = \frac{{{fmt_number(prod_p)}}}{{{fmt_number(prod_z)}}} = {fmt_number(gain)}")
-    if not np.isclose(abs(angle), 180, atol=2.0):
-        status_line("Como o ponto não passou no passo 11, este K é apenas o valor de módulo, não confirma pertencimento ao LGR.", "warning")
-        
-def step_13():
     st.markdown("### Projeto de Controladores pelo Método do LGR")
     
     ctrl_type = st.selectbox("Controlador", ["PD", "PI", "PID"])
@@ -1141,8 +679,8 @@ def step_13():
     st.pyplot(fig_time)
 
 
-def step_14():
-    st.markdown("### 14. Aproximação Discretizada")
+def step_5():
+    st.markdown("### 5. Aproximação Discretizada")
     st.markdown("A discretização é feita pela substituição algébrica do operador $s$ e posterior expansão dos polinómios.")
     
     col1, col2 = st.columns(2)
@@ -1173,10 +711,8 @@ def step_14():
     
     st.markdown("---")
     st.markdown("**I. Função de transferência no domínio contínuo:**")
-    # Utilizando o fmt_poly em vez do nsimplify para forçar a exibição em decimais
     st.latex(rf"F(s) = \frac{{{fmt_poly(num_coeffs, digits=5)}}}{{{fmt_poly(den_coeffs, digits=5)}}}")
     
-    # Escolher a equação de substituição e preparar a formatação
     if method == "Euler Direto / Avanço (Forward)":
         eq_s = (z - 1) / T
         st.markdown("**II. Aplicando a substituição pelo método de Euler Direto:**")
@@ -1200,7 +736,6 @@ def step_14():
         
     st.latex(rf"s = {sp.latex(sp.nsimplify(eq_s, tolerance=1e-4))}")
     
-    # Função interna para gerar a string formatada igual à resolução manual
     def generate_sub_str(coeffs, eq_str):
         degree = len(coeffs) - 1
         terms = []
@@ -1225,13 +760,11 @@ def step_14():
     st.latex(rf"N(z) = {N_z_raw_str}")
     st.latex(rf"D(z) = {D_z_raw_str}")
     
-    # Fazer a álgebra completa para expandir os termos
     F_s = Num_s / Den_s
     F_z_raw = F_s.subs(s, eq_s)
     F_z_simp = sp.cancel(sp.simplify(F_z_raw))
     n_z, d_z = sp.fraction(F_z_simp)
     
-    # Normalizar para o coeficiente de maior grau do denominador ser 1
     d_poly = sp.Poly(d_z, z)
     lead_coeff = d_poly.LC()
     
@@ -1242,7 +775,6 @@ def step_14():
         n_z = sp.expand(n_z)
         d_z = sp.expand(d_z)
         
-    # Avaliar para exibir em formato decimal com 5 casas de precisão
     n_z_eval = n_z.evalf(5)
     d_z_eval = d_z.evalf(5)
     
@@ -1254,72 +786,19 @@ def step_14():
     st.latex(rf"F(z) = \frac{{{sp.latex(n_z_eval)}}}{{{sp.latex(d_z_eval)}}}")
 
 
-def final_plot():
-    st.markdown("O traçado completo é gerado variando `K` e calculando as raízes do polinômio característico.")
-    fig, ax = plt.subplots(figsize=(9, 5.8))
-    setup_axis(ax)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        roots, _ = ct.root_locus(sys, plot=False)
-    for branch in range(roots.shape[1]):
-        ax.plot(roots[:, branch].real, roots[:, branch].imag, color="#2563eb", linewidth=2)
-    plot_poles_zeros(ax, poles, zeros)
-    xlim, ylim = default_limits(poles, zeros)
-    all_re = roots.real[np.isfinite(roots.real)]
-    all_im = roots.imag[np.isfinite(roots.imag)]
-    if all_re.size and all_im.size:
-        xlim = (min(xlim[0], np.nanpercentile(all_re, 2) - 1), max(xlim[1], np.nanpercentile(all_re, 98) + 1))
-        ylim = (min(ylim[0], np.nanpercentile(all_im, 2) - 1), max(ylim[1], np.nanpercentile(all_im, 98) + 1))
-    ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
-    ax.set_title("Lugar Geométrico das Raízes")
-    ax.legend(frameon=True)
-    st.pyplot(fig)
-
-
 STEPS = {
     "1. Polinômio característico": ("Escrever o polinômio característico", step_1),
     "2. Fatoração de P(s)": ("Fatorar P(s) em polos e zeros", step_2),
     "3. Polos e zeros": ("Assinalar polos e zeros no plano s", step_3),
-    "4. Eixo real": ("Assinalar os segmentos do eixo real", step_4),
-    "5. Lugares separados": ("Determinar o número de lugares separados", step_5),
-    "6. Simetria": ("Verificar simetria em relação ao eixo real", step_6),
-    "7. Assíntotas": ("Calcular centroide e ângulos das assíntotas", step_7),
-    "8. Ponto de saída": ("Determinar ponto de saída ou entrada", step_8),
-    "9. Routh-Hurwitz": ("Determinar cruzamento do eixo imaginário", step_9),
-    "10. Ângulos de partida": ("Determinar ângulos de partida e chegada", step_10),
-    "11. Condição de ângulo": ("Testar se um ponto pertence ao LGR", step_11),
-    "12. Cálculo de K": ("Calcular o ganho pelo módulo", step_12),
-    "13. Projeto de Controlador": ("Projeto de Controlador (PD, PI, PID)", step_13),
-    "14. Discretização": ("Aproximação Discretizada (Euler/Tustin)", step_14),
+    "4. Projeto de Controlador": ("Projeto de Controlador (PD, PI, PID)", step_4),
+    "5. Discretização": ("Aproximação Discretizada (Euler/Tustin)", step_5),
 }
 
 
-def overview():
-    st.markdown("### Visão geral")
-    left, right = st.columns([1, 1])
-    with left:
-        st.latex(rf"G(s)=\frac{{{fmt_poly(num_g)}}}{{{fmt_poly(den_g)}}}")
-        st.latex(rf"H(s)=\frac{{{fmt_poly(num_h)}}}{{{fmt_poly(den_h)}}}")
-        st.latex(rf"P(s)=G(s)H(s)=\frac{{{fmt_poly(num_ol)}}}{{{fmt_poly(den_ol)}}}")
-    with right:
-        st.markdown("**Passos que dependem do sistema**")
-        st.write(f"Assíntotas: {'necessário' if npoles > nz else 'não necessário'}")
-        st.write(f"Ponto de saída/entrada: {'verificar candidatos' if real_axis_intervals(poles, zeros) else 'não necessário'}")
-        st.write(f"Ângulos de partida/chegada: {'necessário' if any(p.imag > TOL for p in poles) or any(z.imag > TOL for z in zeros) else 'não necessário'}")
-        gm, _ = safe_margin(sys)
-        st.write(f"Cruzamento no eixo imaginário: {'existe' if gm else 'não encontrado para K positivo'}")
-    final_plot()
-
-
-if view == "Visão geral":
-    overview()
-elif view == "Todos os passos":
-    for index, (_, (title, func)) in enumerate(STEPS.items(), start=1):
-        show_step(index, title, func)
-    show_step("Final", "Gráfico completo do LGR", final_plot)
-elif view == "Gráfico completo":
-    show_step("Final", "Gráfico completo do LGR", final_plot)
+if view == "Todos os passos":
+    for index, (step_key, (title, func)) in enumerate(STEPS.items(), start=1):
+        number = step_key.split(".")[0]
+        show_step(number, title, func)
 else:
     title, func = STEPS[view]
     number = view.split(".")[0]
